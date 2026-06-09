@@ -771,57 +771,325 @@ try {
 
 ---
 
-## 十、安全守则
+## 十、安全守则与隐私过滤
 
-以下是 Agent 在执行任何 Git 操作时必须遵循的强制规则：
+以下是 Agent 在执行任何 Git 操作时必须遵循的强制规则。安全与隐私是第一优先级，宁可中止操作也绝不能泄露敏感信息。
 
-### 绝对禁止的操作
+---
+
+### 10.1 绝对禁止的操作
 
 1. **绝不** 对 `main` / `master` 分支执行 `git push --force`
 2. **绝不** 在未经用户明确确认的情况下执行 `git push --force`（即使是非保护分支）
 3. **绝不** 修改用户现有的 git config（`user.name`、`user.email`、`remote` URL 等）
 4. **绝不** 跳过 git hooks（`--no-verify` / `--no-gpg-sign`），除非用户明确要求
 5. **绝不** 在未经用户确认的情况下删除仓库（包括测试中创建的仓库，需先提示用户）
-6. **绝不** 提交敏感文件（`.env`、`credentials.json`、`*.pem`、`*_rsa`、私钥、API 密钥等）
+6. **绝不** 在 SKILL.md、CHANGELOG、README、提交消息、Release Notes 或任何公开文件中写入真实凭据
 
-### 必须遵守的操作
+---
 
-7. **提交前** 必须检查 staged files，排除敏感文件：
+### 10.2 敏感文件清单（禁止提交）
+
+以下类型的文件和目录 **禁止** 提交到版本库。Agent 在 `git add` 前必须检查。
+
+#### 目录级别
+
+| 目录/模式 | 原因 |
+|-----------|------|
+| `.trae/` | TRAE 配置目录，含 spec/skill 等本地工作文件 |
+| `.vscode/` | VS Code 本地配置（含 launch.json 等） |
+| `.idea/` | JetBrains IDE 本地配置 |
+| `node_modules/` | npm 依赖 |
+| `__pycache__/` | Python 缓存 |
+| `*.egg-info/` | Python 包元数据 |
+| `dist/`、`build/`、`target/` | 构建产物 |
+| `bak/`、`*.bak`、`backup/`、`*.backup` | 备份文件 |
+| `.cursor/`、`.windsurf/` | 其他 IDE 本地配置 |
+
+#### 文件级别
+
+| 文件/模式 | 敏感类型 |
+|-----------|----------|
+| `.env`、`.env.*`、`*.env` | 环境变量（含 API 密钥） |
+| `credentials.json`、`credentials.*` | 凭据文件 |
+| `*.pem`、`*.key`、`*.crt`、`*.cer` | 证书和私钥 |
+| `*_rsa`、`*_dsa`、`*_ed25519`、`id_rsa*` | SSH 密钥 |
+| `*.token`、`token.txt`、`*_token` | Token 文件 |
+| `secrets.*`、`secret.*`、`*.secret` | 密钥文件 |
+| `*.p12`、`*.pfx`、`*.jks`、`*.keystore` | 密钥库 |
+| `config.local.*`、`*.local.*` | 本地配置覆盖 |
+| `*.db`、`*.sqlite`、`*.sqlite3`、`*.mdb` | 数据库文件 |
+| `*.log`、`*.log.*` | 日志文件 |
+| `*.ps1`、`*.bat`、`*.cmd`、`*.sh`（含凭据的脚本） | 含敏感信息的脚本 |
+| `.npmrc`、`.pypirc`、`.netrc` | 包管理器凭据 |
+
+#### 检查命令
 
 ```powershell
-# 检查是否有敏感文件
+# 完整敏感文件扫描
 $staged = git diff --staged --name-only
-$sensitivePatterns = @("\.env$", "credentials", "\.pem$", "privatekey", "secret")
-foreach ($pattern in $sensitivePatterns) {
+$sensitiveDirs = @(
+    "\.trae/", "\.vscode/", "\.idea/", "node_modules/",
+    "__pycache__/", "bak/", "backup/", "\.bak$", "\.backup$",
+    "dist/", "build/", "target/", "\.cursor/", "\.windsurf/"
+)
+$sensitiveFiles = @(
+    "\.env$", "\.env\.", "credentials", "\.pem$", "\.key$",
+    "privatekey", "secret", "\.token$", "token\.", "\.crt$",
+    "id_rsa", "id_dsa", "id_ed25519", "_rsa$", "\.p12$",
+    "\.pfx$", "\.jks$", "\.keystore$", "\.db$", "\.sqlite",
+    "\.sqlite3$", "\.mdb$", "config\.local", "\.local\.",
+    "npmrc$", "pypirc$", "netrc$"
+)
+
+$violations = @()
+
+foreach ($pattern in $sensitiveDirs) {
     $matches = $staged | Select-String $pattern
-    if ($matches) {
-        Write-Error "发现疑似敏感文件: $matches"
-        Write-Error "请确认这些文件是否应该提交"
+    if ($matches) { $violations += $matches }
+}
+
+foreach ($pattern in $sensitiveFiles) {
+    $matches = $staged | Select-String $pattern
+    if ($matches) { $violations += $matches }
+}
+
+if ($violations.Count -gt 0) {
+    Write-Error "发现疑似敏感文件，禁止提交："
+    $violations | ForEach-Object { Write-Error "  $_" }
+    Write-Error "如有 .trae/skills/ 等 Skill 定义文件需提交，请在确认不含敏感信息后手动添加。"
+    exit 1
+}
+```
+
+---
+
+### 10.3 敏感内容检测（提交消息和文件内容）
+
+即使文件本身是安全的，Agent 也必须在 **提交消息**、**CHANGELOG**、**Release Notes** 中避免泄露以下类型的内容：
+
+#### 需脱敏的内容模式
+
+| 模式 | 示例 | 脱敏后 |
+|------|------|--------|
+| Token / API Key | `ghp_abc123...`、`xoxb-...` | `ghp_***`、`<TOKEN>` |
+| 密码 | `password=123456` | `password=<MASKED>` |
+| 私钥内容 | `-----BEGIN RSA PRIVATE KEY-----` | `<PRIVATE_KEY>` |
+| 邮箱（非公开的） | 用户的私人邮箱 | 用 `user@example.com` 替代 |
+| IP 地址（内网） | `192.168.1.100` | `<INTERNAL_IP>` |
+| 数据库连接串 | `mysql://user:pass@host/db` | `mysql://<USER>:<PASS>@<HOST>/<DB>` |
+| 手机号 | `13812345678` | `138****5678` |
+| 身份证号 | `110101199001011234` | `110101********1234` |
+
+#### 提交消息脱敏规则
+
+Agent 生成 Conventional Commit 消息时：
+1. **不将** diff 中出现的 Token、密码、密钥内容写入提交消息
+2. **不将** 用户的真实邮箱或手机号写入提交描述
+3. 提交描述应当概括功能变动，而非具体配置值
+
+```powershell
+# 提交消息脱敏检查
+$commitMsg = "feat(auth): 添加 OAuth2 登录，token=ghp_abc123def456"
+$sensitivePatterns = @(
+    '(ghp_|gho_|ghu_|ghs_|ghr_)[\w]{20,}',
+    'password\s*[=:]\s*\S+',
+    'token\s*[=:]\s*\S+',
+    '-----BEGIN.*PRIVATE KEY-----',
+    '\d{11,}',  # 长数字串（可能是手机号/身份证）
+    '[a-zA-Z0-9]{32,}'  # 长随机字符串（可能是 token）
+)
+
+foreach ($pattern in $sensitivePatterns) {
+    if ($commitMsg -match $pattern) {
+        Write-Error "提交消息疑似包含敏感信息，请修改：$commitMsg"
         exit 1
     }
 }
 ```
 
-8. **推送前** 始终先 fetch 确认远程状态
-9. **双端推送时** 若第一端失败，立即停止，不继续操作第二端
-10. **Pull 前** 始终检查工作区状态，不干净时提醒用户
-11. **版本号变更** 遵循 SemVer 规范，不跳跃版本号
-12. **CHANGELOG** 使用 UTF-8 编码写入，确保中文字符正确
-13. **Tag 操作** 使用带注释的 tag（`git tag -a`），不创建轻量 tag
-14. **错误处理** 每一步操作后检查 `$LASTEXITCODE`，非零时报告具体错误
+---
+
+### 10.4 .gitignore 自动管理
+
+Agent 应在检测到以下情况时，主动建议或更新 `.gitignore`：
+
+- 不存在 `.gitignore` → 创建基础 `.gitignore`，包含常见的敏感目录模式
+- 存在 `.gitignore` 但不包含 `.trae/` / `.env` / `*.bak` → 提示用户是否追加
+- 检测到未追踪的敏感文件 → 提示并建议添加到 `.gitignore`
+
+推荐的基础 `.gitignore` 模板：
+
+```gitignore
+# TRAE 本地文件
+.trae/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+.windsurf/
+
+# 环境变量和密钥
+.env
+.env.*
+*.token
+credentials.*
+secrets.*
+
+# 备份文件
+bak/
+backup/
+*.bak
+*.backup
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+*.mdb
+
+# 依赖
+node_modules/
+__pycache__/
+*.egg-info/
+
+# 构建产物
+dist/
+build/
+target/
+
+# 日志
+*.log
+*.log.*
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 本地配置
+config.local.*
+*.local.*
+```
+
+---
+
+### 10.5 敏感信息意外泄露后的补救
+
+如果 Agent 发现敏感信息已被提交到仓库中，必须立即执行以下步骤：
+
+#### 步骤 1：告知用户
+
+明确告知哪些提交（commit hash）包含了什么类型的敏感信息。
+
+#### 步骤 2：撤销敏感提交（如尚未推送）
+
+```bash
+# 如果敏感提交是最近的提交，且尚未推送
+git reset --soft HEAD~1
+# 从暂存区移除敏感文件
+git reset HEAD <sensitive-file>
+# 重新提交
+```
+
+#### 步骤 3：已推送的补救（使用 git filter-branch 或 BFG）
+
+```bash
+# 使用 git filter-branch 从历史中删除敏感文件
+git filter-branch --force --index-filter \
+  "git rm --cached --ignore-unmatch <sensitive-file>" \
+  --prune-empty --tag-name-filter cat -- --all
+
+# 强制推送（需用户确认）
+# git push --force --all
+# git push --force --tags
+```
+
+#### 步骤 4：轮换凭据
+
+告知用户：如果泄露的是 Token 或密码，除了清理 Git 历史外，还必须在对应的平台（GitHub/Gitee）上**立即撤销该 Token 并重新生成**。Git 历史清理无法保证完全干净，撤销凭据是唯一安全的方式。
+
+---
+
+### 10.6 Git 配置安全检查
+
+Agent 在执行操作前应先检查以下 Git 配置，确保不会意外泄露信息：
+
+```powershell
+# 检查 user.email 是否为私人邮箱（建议使用 GitHub noreply 邮箱）
+$email = git config user.email
+if ($email -match '@qq\.com$|@163\.com$|@gmail\.com$') {
+    Write-Warning "当前 Git user.email 为私人邮箱：$email"
+    Write-Warning "提交时会暴露此邮箱。建议使用 GitHub 匿名邮箱："
+    Write-Warning "  git config user.email '272416939+username@users.noreply.github.com'"
+}
+```
+
+---
+
+### 10.7 CHANGELOG 和 Release Notes 脱敏
+
+生成 CHANGELOG.md 和 Release Notes 时：
+
+1. **不得** 包含文件路径中的用户名或敏感目录名
+2. **不得** 包含任何看起来像 Token 的字符串
+3. 路径中的 `.trae/` 等目录应显示为 `<project-root>/skills/` 形式
+4. 所有生成的内容应先脱敏检查，再写入文件
+
+```powershell
+# CHANGELOG 内容脱敏
+$changelog = Get-Content "CHANGELOG.md" -Raw -Encoding UTF8
+# 替换常见的敏感模式
+$changelog = $changelog -replace '(ghp_|gho_|ghu_|ghs_)[\w]{20,}', '<TOKEN_MASKED>'
+$changelog = $changelog -replace '\b[A-Za-z0-9+/]{40,}={0,2}\b', '<BASE64_MASKED>'
+Set-Content -Path "CHANGELOG.md" -Value $changelog -Encoding UTF8
+```
+
+---
+
+### 10.8 必须遵守的操作
+
+1. **提交前** 必须执行 10.2 的敏感文件扫描
+2. **提交前** 必须检查提交消息不包含 10.3 的敏感内容
+3. **推送前** 始终先 fetch 确认远程状态
+4. **双端推送时** 若第一端失败，立即停止，不继续操作第二端
+5. **Pull 前** 始终检查工作区状态，不干净时提醒用户
+6. **版本号变更** 遵循 SemVer 规范，不跳跃版本号
+7. **CHANGELOG** 使用 UTF-8 编码写入，写入后执行 10.7 脱敏检查
+8. **Tag 操作** 使用带注释的 tag（`git tag -a`），不创建轻量 tag
+9. **错误处理** 每一步操作后检查 `$LASTEXITCODE`，非零时报告具体错误
+10. **凭据** 仅通过 `git credential` 或环境变量使用，**绝不**写入代码或文档
+
+---
+
+### 10.9 隐私保护总结
+
+```
+┌─────────────────────────────────────────────┐
+│           隐私保护检查清单                    │
+├─────────────────────────────────────────────┤
+│ ☑ .trae/ .vscode/ bak/ 等目录已忽略          │
+│ ☑ .env credential token 等文件已忽略          │
+│ ☑ 提交消息无 Token/密码/手机号                │
+│ ☑ CHANGELOG/Release Notes 已脱敏             │
+│ ☑ .gitignore 包含敏感模式                     │
+│ ☑ git config user.email 已保护               │
+│ ☑ 无硬编码凭据在代码或文档中                   │
+└─────────────────────────────────────────────┘
+```
 
 ---
 
 ## 附录 A：环境信息参考
 
-本 Skill 设计基于以下环境假设，Agent 应了解这些信息以正确执行操作：
+本 Skill 设计基于以下环境假设：
 
-- **当前用户**：Allen528
-- **Git 邮箱**：272416939@qq.com
-- **GitHub 用户**：272416939
-- **GitHub Token 权限**：gist、read:org、repo、workflow
 - **操作系统**：Windows (PowerShell)
 - **Shell**：PowerShell 5.1+ 或 PowerShell Core 7+
+- **GitHub CLI**：已通过 `gh auth login` 认证
+- **Gitee**：通过 `git credential` 或 Token 认证
+- **编码**：UTF-8（已通过 Skill 初始化脚本配置）
 
 ## 附录 B：关键命令速查
 
