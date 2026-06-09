@@ -2,8 +2,8 @@
 
 通用 Git 工作流 Skill，为 AI Agent 提供 GitHub + Gitee 双平台完整开发工作流自动化支持。
 
-[![GitHub Release](https://img.shields.io/badge/GitHub-v0.1.0-blue)](https://github.com/272416939/universal-git-workflow/releases)
-[![Gitee](https://img.shields.io/badge/Gitee-v0.1.0-red)](https://gitee.com/Allen0528/universal-git-workflow)
+[![GitHub Release](https://img.shields.io/badge/GitHub-v0.1.1-blue)](https://github.com/272416939/universal-git-workflow/releases)
+[![Gitee](https://img.shields.io/badge/Gitee-v0.1.1-red)](https://gitee.com/Allen0528/universal-git-workflow)
 
 ## 功能
 
@@ -18,6 +18,8 @@
 | **Release 发布** | GitHub Release 自动创建，Gitee tag 同步推送 |
 | **完整工作流** | `--full` 一键从 pull 到发布全流程 |
 | **端到端测试** | `--test` 双平台临时仓库创建、推送验证、自动清理 |
+| **Gitee API** | 自动创建仓库和 Release，无需手动操作 |
+| **隐私过滤** | 敏感文件/Token/密码自动检测脱敏，防泄露 |
 
 ## 使用
 
@@ -70,12 +72,12 @@ Use Skill: universal-git-workflow
 
 - Git
 - GitHub CLI (`gh`) 已登录
-- Gitee 凭据已配置
-- PowerShell (Windows)
+- Gitee PAT（Personal Access Token，用于 API 操作）
+- PowerShell (Windows) 或 pwsh
 
 ## 安装
 
-将本仓库的 `.trae/skills/universal-git-workflow/SKILL.md` 复制到你的项目对应目录，或直接通过 TRAE Skill 市场安装。
+将本仓库根目录的 `SKILL.md` 复制到你项目 `.trae/skills/universal-git-workflow/` 目录下，或直接通过 TRAE Skill 市场安装。
 
 ## License
 
