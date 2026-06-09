@@ -165,6 +165,33 @@
 - **WHEN** 任一平台推送失败
 - **THEN** 系统报告具体失败平台和原因，继续进行清理操作（删除已创建的测试仓库）
 
+### Requirement: 隐私过滤与敏感信息保护
+系统 SHALL 在提交、推送、生成文档等环节自动检测和过滤敏感信息，防止凭据、Token、私人数据泄露到公开仓库。
+
+#### Scenario: 提交前敏感文件扫描
+- **WHEN** Agent 执行 `git add` 准备提交
+- **THEN** 系统检测 staged files 中是否包含敏感文件（`.env`、`credentials.*`、`*.token`、`*.pem`、`*.db`、`bak/` 等）
+- **AND** 发现敏感文件时阻止提交并明确提示文件路径
+
+#### Scenario: 提交消息脱敏检查
+- **WHEN** Agent 生成 Conventional Commit 消息
+- **THEN** 系统检查消息中是否包含 Token 模式（`ghp_***`、`gho_***` 等）、密码、手机号等
+- **AND** 发现敏感内容时阻止提交并要求修改消息
+
+#### Scenario: CHANGELOG/Release Notes 脱敏
+- **WHEN** 生成 CHANGELOG.md 或 Release Notes
+- **THEN** 系统扫描内容中的敏感模式并自动替换为脱敏占位符（如 `<TOKEN_MASKED>`）
+
+#### Scenario: .gitignore 自动管理
+- **WHEN** 项目不存在 `.gitignore` 或缺少必要的敏感条目（如 `.trae/`、`*.bak`、`.env` 等）
+- **THEN** 系统主动建议创建或补充 `.gitignore`
+
+#### Scenario: 敏感信息泄露补救
+- **WHEN** 发现敏感信息已被提交或推送
+- **THEN** 系统告知用户具体泄露的 commit 和内容类型
+- **AND** 提供 `git filter-branch` 或 BFG 清理方案
+- **AND** 提醒用户在平台上撤销并重新生成泄露的 Token/密码
+
 ## MODIFIED Requirements
 无（新建项目）
 
