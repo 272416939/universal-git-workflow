@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.1] - 2026-06-09
+
+### Added
+- feat(gitee): 新增 Gitee API 自动创建仓库和 Release 实战指南
+  - Gitee API 端点速查表（创建/更新/删除仓库和 Release）
+  - 通过 `curl.exe` + UTF-8 JSON 文件绕过 PowerShell 编码陷阱
+  - Git credential PAT 持久化方法
+
+### Fixed
+- fix(encoding): 新增 PowerShell 编码陷阱章节（Invoke-RestMethod 乱码、here-string 语法、chcp 管道输出）
+- fix(test): 测试流程改为 API 自动创建/删除 Gitee 仓库，不再依赖手动操作
+- fix(faults): 补充 5 条常见故障（Gitee API 401、空仓库公开限制、重复 Release、Safe-RM 保护、tag 冲突）
+
+### Changed
+- docs(env): 新增附录 C：TRAE 环境限制（受保护目录、命令长度、curl 别名冲突）
+
 ## [0.1.0] - 2026-06-09
 
 ### Added
